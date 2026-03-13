@@ -58,6 +58,30 @@ class GitOps:
         with open(path, "w", encoding="utf-8") as f:
             f.write("*.blend1\n__pycache__/\n*.pyc\n.DS_Store\n")
 
+    @staticmethod
+    def _parse_refs(refs_raw: str) -> list[str]:
+        if not refs_raw:
+            return []
+        return [ref.strip() for ref in refs_raw.split(", ") if ref.strip()]
+
+    def _extract_local_branch_refs(self, refs: list[str], repo_path: str) -> list[str]:
+        try:
+            local_branches = {
+                branch["name"] for branch in self.list_branches(repo_path)
+            }
+        except RuntimeError:
+            local_branches = set()
+
+        branch_refs: list[str] = []
+        for ref in refs:
+            if ref.startswith("HEAD -> "):
+                candidate = ref.split("HEAD -> ", 1)[1].strip()
+            else:
+                candidate = ref.strip()
+            if candidate in local_branches and candidate not in branch_refs:
+                branch_refs.append(candidate)
+        return branch_refs
+
     # ------------------------------------------------------------------ #
     #  Public API
     # ------------------------------------------------------------------ #
@@ -146,19 +170,20 @@ class GitOps:
             )
         self._run_git(["checkout", ref], cwd=repo_path)
 
-    def get_log(self, repo_path: str, max_count: int = 100) -> list[dict]:
-        result = subprocess.run(
-            [
-                "git", "log", "--all",
-                "--format=%H%x00%h%x00%s%x00%D%x00%ct",
-                f"--max-count={max_count}",
-            ],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
+    def get_timeline(self, repo_path: str, max_count: int = 150) -> list[dict]:
+        try:
+            result = self._run_git(
+                [
+                    "log",
+                    "--all",
+                    "--topo-order",
+                    "--decorate=short",
+                    "--format=%H%x00%h%x00%s%x00%D%x00%ct%x00%P",
+                    f"--max-count={max_count}",
+                ],
+                cwd=repo_path,
+            )
+        except RuntimeError:
             return []
 
         entries: list[dict] = []
@@ -166,22 +191,32 @@ class GitOps:
             if not line:
                 continue
             parts = line.split("\x00")
-            if len(parts) < 5:
+            if len(parts) < 6:
                 continue
-            refs_raw = parts[3].strip()
-            refs = (
-                [r.strip() for r in refs_raw.split(", ") if r.strip()]
-                if refs_raw
-                else []
-            )
+            refs = self._parse_refs(parts[3].strip())
             entries.append({
                 "hash": parts[0],
                 "short_hash": parts[1],
                 "message": parts[2],
                 "refs": refs,
+                "branch_refs": self._extract_local_branch_refs(refs, repo_path),
                 "timestamp": int(parts[4]),
+                "parents": [parent for parent in parts[5].split() if parent],
             })
         return entries
+
+    def get_log(self, repo_path: str, max_count: int = 100) -> list[dict]:
+        entries = self.get_timeline(repo_path, max_count=max_count)
+        return [
+            {
+                "hash": entry["hash"],
+                "short_hash": entry["short_hash"],
+                "message": entry["message"],
+                "refs": entry["refs"],
+                "timestamp": entry["timestamp"],
+            }
+            for entry in entries
+        ]
 
     @staticmethod
     def sanitize_branch_name(name: str) -> str:

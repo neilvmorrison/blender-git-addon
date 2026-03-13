@@ -311,6 +311,52 @@ def test_get_log_refs_parsed(repo: str, ops: GitOps):
 
 
 # ------------------------------------------------------------------ #
+#  get_timeline
+# ------------------------------------------------------------------ #
+
+
+@skip_no_git
+@skip_no_lfs
+def test_get_timeline_initial(repo: str, ops: GitOps):
+    timeline = ops.get_timeline(repo)
+    assert len(timeline) == 1
+    assert timeline[0]["message"] == "Initialize project"
+    assert timeline[0]["parents"] == []
+    assert "main" in timeline[0]["branch_refs"]
+
+
+@skip_no_git
+@skip_no_lfs
+def test_get_timeline_includes_parent_hashes(repo: str, ops: GitOps):
+    with open(os.path.join(repo, "a.txt"), "w") as f:
+        f.write("a")
+    first_hash = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    ops.commit(repo, "Second")
+    timeline = ops.get_timeline(repo)
+
+    latest = timeline[0]
+    assert latest["message"] == "Second"
+    assert latest["parents"] == [first_hash]
+
+
+@skip_no_git
+@skip_no_lfs
+def test_get_timeline_tracks_local_branch_refs(repo: str, ops: GitOps):
+    ops.create_branch(repo, "feature")
+    timeline = ops.get_timeline(repo)
+
+    assert "feature" in timeline[0]["branch_refs"]
+    assert "main" not in timeline[0]["branch_refs"]
+
+
+# ------------------------------------------------------------------ #
 #  sanitize_branch_name
 # ------------------------------------------------------------------ #
 

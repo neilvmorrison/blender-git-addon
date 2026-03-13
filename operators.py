@@ -5,7 +5,15 @@ import shutil
 import bpy
 
 from .git_ops import git_ops
-from .panels import invalidate_cache, is_repo_cached
+from .panels import (
+    clear_timeline_mouse,
+    ensure_timeline_handler,
+    handle_timeline_event,
+    invalidate_cache,
+    is_repo_cached,
+    remove_timeline_handler,
+    tag_view3d_redraw,
+)
 
 
 def _derive_project_name(filepath: str) -> str:
@@ -265,6 +273,111 @@ class GitToggleBranchInput(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class GitTimelineModal(bpy.types.Operator):
+    bl_idname = "git.timeline_modal"
+    bl_label = "Git Timeline Interaction"
+
+    _is_running = False
+
+    def invoke(self, context, event):
+        if GitTimelineModal._is_running:
+            return {"CANCELLED"}
+        GitTimelineModal._is_running = True
+        ensure_timeline_handler()
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if (
+            not context.window_manager.git_timeline_visible
+            or not bpy.data.filepath
+            or not is_repo_cached(os.path.dirname(bpy.data.filepath))
+        ):
+            clear_timeline_mouse()
+            remove_timeline_handler()
+            GitTimelineModal._is_running = False
+            return {"CANCELLED"}
+
+        if handle_timeline_event(context, event):
+            return {"RUNNING_MODAL"}
+        if event.type == "ESC":
+            context.window_manager.git_timeline_visible = False
+            clear_timeline_mouse()
+            remove_timeline_handler()
+            GitTimelineModal._is_running = False
+            return {"CANCELLED"}
+        return {"PASS_THROUGH"}
+
+
+class GitToggleTimeline(bpy.types.Operator):
+    bl_idname = "git.toggle_timeline"
+    bl_label = "Toggle Timeline"
+    bl_description = "Show or hide the git timeline overlay"
+
+    @classmethod
+    def poll(cls, context):
+        if not bpy.data.filepath:
+            return False
+        return is_repo_cached(os.path.dirname(bpy.data.filepath))
+
+    def execute(self, context):
+        wm = context.window_manager
+        wm.git_timeline_visible = not wm.git_timeline_visible
+        wm.git_timeline_scroll = 0.0
+        wm.git_timeline_hover_hash = ""
+
+        if wm.git_timeline_visible:
+            bpy.ops.git.timeline_modal("INVOKE_DEFAULT")
+        else:
+            clear_timeline_mouse()
+            remove_timeline_handler()
+            tag_view3d_redraw()
+        return {"FINISHED"}
+
+
+class GitResetTimelinePosition(bpy.types.Operator):
+    bl_idname = "git.reset_timeline_position"
+    bl_label = "Reset Timeline Position"
+    bl_description = "Reset timeline to its default position next to the Git panel"
+
+    @classmethod
+    def poll(cls, context):
+        if not bpy.data.filepath:
+            return False
+        return is_repo_cached(os.path.dirname(bpy.data.filepath))
+
+    def execute(self, context):
+        wm = context.window_manager
+        wm.git_timeline_offset_x = 0.0
+        wm.git_timeline_offset_y = 0.0
+        tag_view3d_redraw()
+        return {"FINISHED"}
+
+
+class GitCycleTimelineOrder(bpy.types.Operator):
+    bl_idname = "git.cycle_timeline_order"
+    bl_label = "Cycle Timeline Order"
+    bl_description = "Switch between top-down and bottom-up commit ordering"
+
+    @classmethod
+    def poll(cls, context):
+        if not bpy.data.filepath:
+            return False
+        return is_repo_cached(os.path.dirname(bpy.data.filepath))
+
+    def execute(self, context):
+        wm = context.window_manager
+        wm.git_timeline_order = (
+            "TOP_DOWN"
+            if wm.git_timeline_order == "BOTTOM_UP"
+            else "BOTTOM_UP"
+        )
+        wm.git_timeline_scroll = 0.0
+        wm.git_timeline_hover_hash = ""
+        tag_view3d_redraw()
+        return {"FINISHED"}
+
+
 classes = [
     GitOpenPreferences,
     GitInitRepo,
@@ -274,6 +387,10 @@ classes = [
     GitCheckoutBranch,
     GitToggleCommitInput,
     GitToggleBranchInput,
+    GitTimelineModal,
+    GitToggleTimeline,
+    GitResetTimelinePosition,
+    GitCycleTimelineOrder,
 ]
 
 
