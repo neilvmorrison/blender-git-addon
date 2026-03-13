@@ -3,6 +3,7 @@ import os
 import bpy
 
 from .git_ops import git_ops
+from .panels import invalidate_cache, is_repo_cached
 
 
 class GitInitRepo(bpy.types.Operator):
@@ -14,7 +15,7 @@ class GitInitRepo(bpy.types.Operator):
     def poll(cls, context):
         if not bpy.data.filepath:
             return False
-        return not git_ops.is_git_repo(os.path.dirname(bpy.data.filepath))
+        return not is_repo_cached(os.path.dirname(bpy.data.filepath))
 
     def execute(self, context):
         try:
@@ -24,6 +25,7 @@ class GitInitRepo(bpy.types.Operator):
         except RuntimeError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+        invalidate_cache()
         self.report({"INFO"}, "Project initialized")
         return {"FINISHED"}
 
@@ -37,7 +39,7 @@ class GitCommit(bpy.types.Operator):
     def poll(cls, context):
         if not bpy.data.filepath:
             return False
-        return git_ops.is_git_repo(os.path.dirname(bpy.data.filepath))
+        return is_repo_cached(os.path.dirname(bpy.data.filepath))
 
     def execute(self, context):
         try:
@@ -49,6 +51,7 @@ class GitCommit(bpy.types.Operator):
         except RuntimeError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+        invalidate_cache()
         wm.git_show_commit_input = False
         wm.git_commit_message = "Save progress"
         self.report({"INFO"}, f"Version saved ({short_hash})")
@@ -64,7 +67,7 @@ class GitCreateBranch(bpy.types.Operator):
     def poll(cls, context):
         if not bpy.data.filepath:
             return False
-        return git_ops.is_git_repo(os.path.dirname(bpy.data.filepath))
+        return is_repo_cached(os.path.dirname(bpy.data.filepath))
 
     def execute(self, context):
         try:
@@ -76,6 +79,7 @@ class GitCreateBranch(bpy.types.Operator):
         except RuntimeError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+        invalidate_cache()
         wm.git_show_branch_input = False
         wm.git_branch_name = ""
         self.report({"INFO"}, f"Branch '{sanitized}' created")
@@ -93,7 +97,7 @@ class GitCheckoutBranch(bpy.types.Operator):
     def poll(cls, context):
         if not bpy.data.filepath:
             return False
-        return git_ops.is_git_repo(os.path.dirname(bpy.data.filepath))
+        return is_repo_cached(os.path.dirname(bpy.data.filepath))
 
     def execute(self, context):
         try:
@@ -108,6 +112,8 @@ class GitCheckoutBranch(bpy.types.Operator):
         except RuntimeError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
+
+        invalidate_cache()
 
         # Reload the .blend file so LFS serves the correct binary
         bpy.ops.wm.open_mainfile(filepath=bpy.data.filepath)

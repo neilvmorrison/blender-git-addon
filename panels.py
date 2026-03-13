@@ -1,8 +1,65 @@
 import os
+import time
 
 import bpy
 
 from .git_ops import git_ops
+
+# ---------------------------------------------------------------------------
+# Git state cache — avoids spawning subprocesses on every panel redraw / poll
+# ---------------------------------------------------------------------------
+
+_cache: dict = {}
+_cache_time: float = 0.0
+_cache_repo: str = ""
+_CACHE_TTL: float = 2.0  # seconds
+
+
+def _get_git_state(repo_path: str) -> dict:
+    """Return cached git state for *repo_path*, refreshing at most every 2 s."""
+    global _cache, _cache_time, _cache_repo
+
+    now = time.monotonic()
+    if (
+        _cache
+        and _cache_repo == repo_path
+        and (now - _cache_time) < _CACHE_TTL
+    ):
+        return _cache
+
+    is_repo = git_ops.is_git_repo(repo_path)
+    if is_repo:
+        current_branch = git_ops.get_current_branch(repo_path) or "detached HEAD"
+        branches = git_ops.list_branches(repo_path)
+    else:
+        current_branch = ""
+        branches = []
+
+    _cache = {
+        "is_repo": is_repo,
+        "current_branch": current_branch,
+        "branches": branches,
+    }
+    _cache_time = now
+    _cache_repo = repo_path
+    return _cache
+
+
+def invalidate_cache() -> None:
+    """Force the next ``_get_git_state`` call to re-query git.
+
+    Call this from operators that mutate git state (init, commit, branch,
+    checkout).
+    """
+    global _cache, _cache_time, _cache_repo
+    _cache = {}
+    _cache_time = 0.0
+    _cache_repo = ""
+
+
+def is_repo_cached(repo_path: str) -> bool:
+    """Lightweight check used by operator ``poll()`` methods."""
+    return _get_git_state(repo_path).get("is_repo", False)
 
 
 def _get_deps() -> dict[str, bool]:
@@ -42,14 +99,16 @@ class GIT_PT_main(bpy.types.Panel):
 
         repo_path = os.path.dirname(bpy.data.filepath)
 
+        # Use cached git state to avoid subprocess calls on every redraw
+        state = _get_git_state(repo_path)
+
         # State 3: Not a git repo
-        if not git_ops.is_git_repo(repo_path):
+        if not state["is_repo"]:
             layout.operator("git.init_repo", icon="ADD")
             return
 
         # State 4: Initialized — full UI
-        branch = git_ops.get_current_branch(repo_path) or "detached HEAD"
-        layout.label(text=f"Branch: {branch}")
+        layout.label(text=f"Branch: {state['current_branch']}")
 
         # Commit section
         layout.separator()
@@ -80,8 +139,7 @@ class GIT_PT_main(bpy.types.Panel):
         # Branch switcher section
         layout.separator()
         layout.label(text="Branches:")
-        branches = git_ops.list_branches(repo_path)
-        for b in branches:
+        for b in state["branches"]:
             row = layout.row()
             icon = "RADIOBUT_ON" if b["is_current"] else "RADIOBUT_OFF"
             op = row.operator("git.checkout_branch", text=b["name"], icon=icon)
