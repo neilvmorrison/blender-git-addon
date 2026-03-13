@@ -115,23 +115,12 @@ class GIT_PT_main(bpy.types.Panel):
             layout.operator("git.init_repo", icon="ADD")
             return
 
-        # State 5: Initialized — full UI
-        layout.label(text=f"Branch: {state['current_branch']}")
+        # Branch switcher section — keep dropdown in sync with actual git state
+        if wm.git_active_branch != state["current_branch"]:
+            wm.git_active_branch = state["current_branch"]
 
-        # Commit section
         layout.separator()
-        row = layout.row()
-        row.operator(
-            "git.toggle_commit_input",
-            text="Save Version" if not wm.git_show_commit_input else "Cancel",
-            icon="FILE_TICK",
-        )
-        if wm.git_show_commit_input:
-            layout.prop(wm, "git_commit_message", text="")
-            layout.operator("git.commit", text="Commit", icon="CHECKMARK")
-
-        # Branch creation section
-        layout.separator()
+        layout.prop(wm, "git_active_branch", text="Branch")
         row = layout.row()
         row.operator(
             "git.toggle_branch_input",
@@ -144,15 +133,17 @@ class GIT_PT_main(bpy.types.Panel):
                 "git.create_branch", text="Create Branch", icon="CHECKMARK"
             )
 
-        # Branch switcher section
+        # Commit section
         layout.separator()
-        layout.label(text="Branches:")
-        for b in state["branches"]:
-            row = layout.row()
-            icon = "RADIOBUT_ON" if b["is_current"] else "RADIOBUT_OFF"
-            op = row.operator("git.checkout_branch", text=b["name"], icon=icon)
-            op.ref = b["name"]
-            row.enabled = not b["is_current"]
+        row = layout.row()
+        row.operator(
+            "git.toggle_commit_input",
+            text="Create Commit" if not wm.git_show_commit_input else "Cancel",
+            icon="FILE_TICK",
+        )
+        if wm.git_show_commit_input:
+            layout.prop(wm, "git_commit_message", text="")
+            layout.operator("git.commit", text="Commit", icon="CHECKMARK")
 
 
 classes = [GIT_PT_main]
