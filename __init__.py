@@ -10,7 +10,7 @@ bl_info = {
 
 import bpy
 
-from .git_ops import git_ops
+from .lib.git_ops import git_ops
 from . import properties, operators, panels
 
 # Module-level cache for dependency check — survives window manager resets

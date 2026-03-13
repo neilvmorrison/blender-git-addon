@@ -4,7 +4,7 @@ import shutil
 
 import bpy
 
-from .git_ops import git_ops
+from .lib.git_ops import git_ops
 from .panels import (
     clear_timeline_mouse,
     ensure_timeline_handler,

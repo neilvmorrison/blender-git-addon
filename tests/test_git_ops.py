@@ -4,15 +4,7 @@ import subprocess
 
 import pytest
 
-# Adjust import path so tests can find git_ops regardless of working directory.
-import sys
-
-sys.path.insert(
-    0,
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-)
-
-from git_ops import GitOps
+from lib.git_ops import GitOps
 
 skip_no_git = pytest.mark.skipif(
     shutil.which("git") is None, reason="git not installed"
@@ -440,6 +432,6 @@ def test_sanitize_all_forbidden_raises(ops: GitOps):
 
 
 def test_module_level_instance():
-    from git_ops import git_ops
+    from lib.git_ops import git_ops
 
     assert isinstance(git_ops, GitOps)

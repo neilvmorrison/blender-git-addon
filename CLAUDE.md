@@ -4,16 +4,25 @@
 
 A Blender Python addon that provides a GUI for version-controlling Blender project files using Git LFS (Large File Storage). Targeted at non-technical Blender users who want the safety of version control without needing to understand git.
 
-## Project Structure (Target)
+## Project Structure
 
 ```
 blender-git/
 ├── __init__.py          # Addon registration, bl_info, preferences class
 ├── operators.py         # bpy.types.Operator subclasses (all user actions)
 ├── panels.py            # bpy.types.Panel subclasses (sidebar + timeline UI)
-├── git_ops.py           # All git/LFS subprocess calls — no bpy dependency
 ├── properties.py        # bpy.props definitions stored on the scene/window
-└── .claude/docs/        # Design docs — read these before implementing anything
+├── lib/                 # Git logic and shared utilities (no/minimal bpy)
+│   ├── git_ops.py       # Git/LFS subprocess calls — no bpy dependency
+│   ├── git_cache.py     # Cached git state for UI
+│   ├── timeline_graph.py # Branch layout logic for timeline
+│   ├── constants.py    # UI/layout constants
+│   └── redraw.py       # View3D redraw helper
+├── timeline/            # Timeline overlay UI
+│   ├── overlay.py      # Draw handler + event handling
+│   └── draw.py         # GPU drawing primitives
+├── tests/
+└── .claude/docs/       # Design docs — read these before implementing anything
 ```
 
 ## Available Agents & Skills
@@ -98,7 +107,13 @@ Error message when git-lfs is missing:
 
 ## Development / Testing
 
-Since `bpy` is only available inside Blender, test `git_ops.py` functions directly with Python outside Blender. For UI testing, install the addon in Blender via Edit > Preferences > Add-ons > Install.
+Since `bpy` is only available inside Blender, test `lib/git_ops.py` directly with Python outside Blender:
+
+```bash
+cd blender-git && python3 -c "from lib.git_ops import GitOps; print(GitOps().check_dependencies())"
+```
+
+For full pytest runs, the addon root `__init__.py` (which imports bpy) is loaded by pytest's package discovery, so run tests from Blender's Python or move tests outside the addon package. For UI testing, install the addon in Blender via Edit > Preferences > Add-ons > Install.
 
 To reload during development without restarting Blender, use the [Blender Development](https://marketplace.visualstudio.com/items?itemName=JacquesLucke.blender-development) VSCode extension for live reload, or in the Python console:
 

@@ -28,10 +28,6 @@ _ENV = _build_env()
 
 class GitOps:
 
-    # ------------------------------------------------------------------ #
-    #  Private helpers
-    # ------------------------------------------------------------------ #
-
     @staticmethod
     def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess:
         result = subprocess.run(
@@ -81,10 +77,6 @@ class GitOps:
             if candidate in local_branches and candidate not in branch_refs:
                 branch_refs.append(candidate)
         return branch_refs
-
-    # ------------------------------------------------------------------ #
-    #  Public API
-    # ------------------------------------------------------------------ #
 
     @staticmethod
     def check_dependencies() -> dict[str, bool]:
@@ -250,19 +242,12 @@ class GitOps:
     @staticmethod
     def sanitize_branch_name(name: str) -> str:
         name = name.strip()
-        # Replace spaces and backslashes with dashes
         name = re.sub(r"[\s\\]+", "-", name)
-        # Remove forbidden characters
         name = re.sub(r"[~^:?*\[\]]+", "", name)
-        # Collapse consecutive dots
         name = re.sub(r"\.{2,}", ".", name)
-        # Strip leading . - _
         name = name.lstrip(".-_")
-        # Strip trailing .lock
         name = re.sub(r"\.lock$", "", name)
-        # Strip trailing . and -
         name = name.rstrip(".-")
-        # Collapse consecutive dashes
         name = re.sub(r"-{2,}", "-", name)
 
         if not name:

@@ -1,0 +1,21 @@
+CACHE_TTL: float = 2.0
+GRAPH_MAX_COUNT: int = 200
+TIMELINE_WIDTH: float = 320.0
+TIMELINE_PADDING: float = 16.0
+GIT_PANEL_TOP_OFFSET: float = 44.0
+TIMELINE_HEADER_HEIGHT: float = 44.0
+TIMELINE_ROW_HEIGHT: float = 50.0
+TIMELINE_LANE_GAP: float = 42.0
+TIMELINE_NODE_RADIUS: float = 7.0
+TIMELINE_BORDER_RADIUS: float = 10.0
+TIMELINE_BRANCH_WIDTH: float = 9.0
+TIMELINE_CIRCLE_OUTLINE_WIDTH: float = 12.0
+FONT_ID: int = 0
+FALLBACK_BRANCH_COLORS: list[tuple[float, float, float]] = [
+    (0.984, 0.549, 0.235),
+    (0.396, 0.722, 1.0),
+    (0.863, 0.384, 0.953),
+    (0.973, 0.808, 0.278),
+    (0.376, 0.922, 0.659),
+    (0.945, 0.443, 0.443),
+]

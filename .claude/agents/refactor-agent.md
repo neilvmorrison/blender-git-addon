@@ -15,6 +15,11 @@ Intelligently refactor Python code while preserving behavior, improving readabil
 2. Generate refactored version with rationale
 3. Validate with syntax/linting/type checking
 4. Present diffs and explanation for review
+5. Hoist constants into a constants.py file
+
+## Guidelines
+
+- maximum file length ~300 lines. If exceeded, abstract methods into modules separated by concern
 
 ## Output
 
@@ -22,3 +27,4 @@ Intelligently refactor Python code while preserving behavior, improving readabil
 - Change explanation
 - Validation results
 - Readiness assessment
+  i
