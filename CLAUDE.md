@@ -16,6 +16,22 @@ blender-git/
 └── .claude/docs/        # Design docs — read these before implementing anything
 ```
 
+## Available Agents & Skills
+
+### Code Refactoring Agent
+
+- **Location**: `.claude/agents/refactor_skill.py`
+- **Capability**: Refactor Python code with DRY principles, type hints, and industry best practices
+- **When to use**:
+  - User asks "refactor this code"
+  - You notice duplicated patterns
+  - Code lacks type hints or docstrings
+- **Safety**: Always presents changes for review before applying
+
+### How to trigger
+
+User can say: "Use the refactoring skill on src/data.py to reduce duplication"
+
 ## Blender Addon Conventions
 
 - Every class that uses `bpy` must be registered via `bpy.utils.register_class()` in `register()` and unregistered in `unregister()` — both called in `__init__.py`.
@@ -40,12 +56,15 @@ def check_dependencies() -> dict:
 ```
 
 Error message to show users when git is missing:
+
 > "Git is not installed. Please install it from git-scm.com, then restart Blender."
 
 Error message when git-lfs is missing:
+
 > "Git LFS is not installed. Please install it from git-lfs.com, then restart Blender."
 
 ### Key operations needed
+
 - `check_dependencies()` — verify `git` and `git-lfs` are on PATH
 - `init_repo(path)` — `git init`, set default branch to `main`, write `.gitattributes` for LFS, run `git lfs install`
 - `commit(repo_path, message)` — stage all (`git add -A`) and commit
@@ -82,6 +101,7 @@ Error message when git-lfs is missing:
 Since `bpy` is only available inside Blender, test `git_ops.py` functions directly with Python outside Blender. For UI testing, install the addon in Blender via Edit > Preferences > Add-ons > Install.
 
 To reload during development without restarting Blender, use the [Blender Development](https://marketplace.visualstudio.com/items?itemName=JacquesLucke.blender-development) VSCode extension for live reload, or in the Python console:
+
 ```python
 bpy.ops.preferences.addon_disable(module="blender-git")
 bpy.ops.preferences.addon_enable(module="blender-git")

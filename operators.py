@@ -75,13 +75,10 @@ class GitInitRepo(bpy.types.Operator):
         filepath = bpy.data.filepath
         norm_filepath_dir = os.path.normpath(os.path.dirname(filepath)) if filepath else None
 
-        # Check if file is already under projects_dir (init in place)
+        # Check if file is already in a project subdirectory under projects_dir
         already_under = (
             norm_filepath_dir is not None
-            and (
-                norm_filepath_dir == projects_dir
-                or norm_filepath_dir.startswith(projects_dir + os.sep)
-            )
+            and norm_filepath_dir.startswith(projects_dir + os.sep)
         )
 
         if already_under:
@@ -97,7 +94,6 @@ class GitInitRepo(bpy.types.Operator):
                 target_dir = f"{target_dir}-{suffix}"
             new_dir_created = True
 
-        file_moved = False
         try:
             if new_dir_created:
                 os.makedirs(target_dir)
@@ -112,25 +108,26 @@ class GitInitRepo(bpy.types.Operator):
                 bpy.ops.wm.save_mainfile()
 
             else:
-                # Case 2: Saved file elsewhere — move to new project dir
+                # Case 2: Saved file elsewhere — copy to new project dir
                 bpy.ops.wm.save_mainfile()
                 dst = os.path.join(target_dir, os.path.basename(filepath))
-                shutil.move(filepath, dst)
-                file_moved = True
-                blend1 = filepath + "1"
-                if os.path.exists(blend1):
-                    shutil.move(blend1, os.path.join(target_dir, os.path.basename(blend1)))
+                shutil.copy2(filepath, dst)
 
                 git_ops.init_repo(target_dir)
                 invalidate_cache()
-                bpy.ops.wm.open_mainfile(filepath=dst)
+
+                dst_path = dst
+                bpy.app.timers.register(
+                    lambda: bpy.ops.git.confirm_open("INVOKE_DEFAULT", filepath=dst_path) and None,
+                    first_interval=0.05,
+                )
                 return {"FINISHED"}
 
             git_ops.init_repo(target_dir)
 
         except (OSError, RuntimeError) as e:
             self.report({"ERROR"}, str(e))
-            if new_dir_created and not file_moved and os.path.exists(target_dir):
+            if new_dir_created and os.path.exists(target_dir):
                 shutil.rmtree(target_dir, ignore_errors=True)
             return {"CANCELLED"}
 
@@ -229,6 +226,21 @@ class GitCheckoutBranch(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class GitConfirmOpen(bpy.types.Operator):
+    bl_idname = "git.confirm_open"
+    bl_label = "Open New Project?"
+    bl_description = "Open the newly initialized project file"
+
+    filepath: bpy.props.StringProperty()
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        bpy.ops.wm.open_mainfile(filepath=self.filepath)
+        return {"FINISHED"}
+
+
 class GitToggleCommitInput(bpy.types.Operator):
     bl_idname = "git.toggle_commit_input"
     bl_label = "Toggle Commit Input"
@@ -256,6 +268,7 @@ class GitToggleBranchInput(bpy.types.Operator):
 classes = [
     GitOpenPreferences,
     GitInitRepo,
+    GitConfirmOpen,
     GitCommit,
     GitCreateBranch,
     GitCheckoutBranch,
