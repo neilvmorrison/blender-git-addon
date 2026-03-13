@@ -356,6 +356,25 @@ def test_get_timeline_tracks_local_branch_refs(repo: str, ops: GitOps):
     assert "main" not in timeline[0]["branch_refs"]
 
 
+@skip_no_git
+@skip_no_lfs
+def test_get_branch_lineages_includes_branches(repo: str, ops: GitOps):
+    with open(os.path.join(repo, "main.txt"), "w") as f:
+        f.write("main")
+    ops.commit(repo, "Main one")
+    ops.create_branch(repo, "feature")
+    with open(os.path.join(repo, "feature.txt"), "w") as f:
+        f.write("feature")
+    ops.commit(repo, "Feature one")
+
+    lineages = ops.get_branch_lineages(repo)
+
+    assert "main" in lineages
+    assert "feature" in lineages
+    assert len(lineages["feature"]) >= 2
+    assert lineages["feature"][1] in lineages["main"]
+
+
 # ------------------------------------------------------------------ #
 #  sanitize_branch_name
 # ------------------------------------------------------------------ #

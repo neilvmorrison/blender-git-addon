@@ -17,11 +17,11 @@ _TIMELINE_WIDTH: float = 320.0
 _TIMELINE_PADDING: float = 16.0
 _GIT_PANEL_TOP_OFFSET: float = 44.0
 _TIMELINE_HEADER_HEIGHT: float = 44.0
-_TIMELINE_ROW_HEIGHT: float = 34.0
-_TIMELINE_LANE_GAP: float = 28.0
+_TIMELINE_ROW_HEIGHT: float = 50.0
+_TIMELINE_LANE_GAP: float = 42.0
 _TIMELINE_NODE_RADIUS: float = 7.0
 _TIMELINE_BORDER_RADIUS: float = 10.0
-_TIMELINE_BRANCH_WIDTH: float = 3.0
+_TIMELINE_BRANCH_WIDTH: float = 9.0
 _FONT_ID: int = 0
 _FALLBACK_BRANCH_COLORS: list[tuple[float, float, float]] = [
     (0.984, 0.549, 0.235),
@@ -56,102 +56,137 @@ _timeline_drag: dict[str, bool | float | None] = {
 }
 
 
-def _first_free_lane(active_lanes: list[dict | None]) -> int:
-    for index, slot in enumerate(active_lanes):
-        if slot is None:
-            return index
-    return len(active_lanes)
-
-
-def _find_lane_for_hash(active_lanes: list[dict | None], commit_hash: str) -> int | None:
-    for index, slot in enumerate(active_lanes):
-        if slot and slot["hash"] == commit_hash:
-            return index
-    return None
-
-
 def _is_primary_branch(branch_name: str | None) -> bool:
     return branch_name in {"main", "master"}
 
 
-def _choose_branch_name(
-    branch_refs: list[str],
-    inherited_branch: str | None,
-) -> str | None:
-    if inherited_branch and inherited_branch in branch_refs:
-        return inherited_branch
-    for branch_name in branch_refs:
-        if _is_primary_branch(branch_name):
+def _get_primary_branch_name(branch_lineages: dict[str, list[str]]) -> str | None:
+    for branch_name in ("main", "master"):
+        if branch_name in branch_lineages:
             return branch_name
-    if branch_refs:
-        return branch_refs[0]
-    return inherited_branch
+    return next(iter(branch_lineages), None)
 
 
-def _build_timeline_layout(entries: list[dict]) -> dict:
-    active_lanes: list[dict | None] = []
-    commits: list[dict] = []
-    max_lane = 0
+def _find_branch_meta(
+    branch_name: str,
+    branch_lineages: dict[str, list[str]],
+    entry_index_by_hash: dict[str, int],
+    primary_branch: str | None,
+) -> dict:
+    chain = branch_lineages.get(branch_name, [])
+    other_branches = [name for name in branch_lineages if name != branch_name]
+    other_sets = {
+        name: set(branch_lineages[name])
+        for name in other_branches
+    }
 
-    for entry in entries:
-        matching_lanes = [
-            index
-            for index, slot in enumerate(active_lanes)
-            if slot and slot["hash"] == entry["hash"]
+    anchor_hash = chain[-1] if chain else None
+    base_branch = primary_branch
+    unique_hashes = list(chain)
+
+    for depth, commit_hash in enumerate(chain):
+        shared_with = [
+            name for name, hashes in other_sets.items()
+            if commit_hash in hashes
         ]
-        inherited_branch = None
-        lane = None
-
-        if matching_lanes:
-            lane = matching_lanes[0]
-            inherited_candidates = [
-                active_lanes[index]["branch"]
-                for index in matching_lanes
-                if active_lanes[index] and active_lanes[index]["branch"]
-            ]
-            inherited_branch = inherited_candidates[0] if inherited_candidates else None
-            for index in matching_lanes:
-                active_lanes[index] = None
+        if not shared_with:
+            continue
+        if primary_branch in shared_with:
+            base_branch = primary_branch
         else:
-            lane = _first_free_lane(active_lanes)
+            base_branch = shared_with[0]
+        anchor_hash = commit_hash
+        unique_hashes = chain[:depth]
+        break
 
-        while lane >= len(active_lanes):
-            active_lanes.append(None)
+    anchor_index = entry_index_by_hash.get(anchor_hash, len(entry_index_by_hash))
+    return {
+        "branch_name": branch_name,
+        "base_branch": base_branch,
+        "anchor_hash": anchor_hash,
+        "anchor_index": anchor_index,
+        "unique_hashes": unique_hashes,
+        "dangling": bool(anchor_hash and not unique_hashes),
+    }
 
-        branch_name = _choose_branch_name(entry["branch_refs"], inherited_branch)
-        active_lanes[lane] = None
 
-        if entry["parents"]:
-            active_lanes[lane] = {
-                "hash": entry["parents"][0],
-                "branch": branch_name,
-            }
-            for branch_index, parent_hash in enumerate(entry["parents"][1:], start=1):
-                target_lane = _find_lane_for_hash(active_lanes, parent_hash)
-                if target_lane is None:
-                    target_lane = _first_free_lane(active_lanes)
-                while target_lane >= len(active_lanes):
-                    active_lanes.append(None)
-                target_branch = None
-                if branch_index < len(entry["branch_refs"]):
-                    target_branch = entry["branch_refs"][branch_index]
-                active_lanes[target_lane] = {
-                    "hash": parent_hash,
-                    "branch": target_branch or branch_name,
-                }
+def _build_timeline_layout(
+    entries: list[dict],
+    branch_lineages: dict[str, list[str]],
+) -> dict:
+    entry_index_by_hash = {
+        entry["hash"]: index for index, entry in enumerate(entries)
+    }
+    primary_branch = _get_primary_branch_name(branch_lineages)
+
+    branch_metas: dict[str, dict] = {}
+    for branch_name in branch_lineages:
+        branch_metas[branch_name] = _find_branch_meta(
+            branch_name,
+            branch_lineages,
+            entry_index_by_hash,
+            primary_branch,
+        )
+
+    ordered_branches = [
+        branch_name
+        for branch_name in sorted(
+            branch_lineages,
+            key=lambda name: (
+                0 if name == primary_branch else 1,
+                branch_metas[name]["anchor_index"],
+                name,
+            ),
+        )
+    ]
+
+    lane_by_branch: dict[str, int] = {}
+    next_lane = 0
+    for branch_name in ordered_branches:
+        lane_by_branch[branch_name] = next_lane
+        next_lane += 1
+
+    owner_by_hash: dict[str, str] = {}
+    if primary_branch:
+        for commit_hash in branch_lineages.get(primary_branch, []):
+            owner_by_hash[commit_hash] = primary_branch
+
+    for branch_name in ordered_branches:
+        if branch_name == primary_branch:
+            continue
+        for commit_hash in branch_metas[branch_name]["unique_hashes"]:
+            owner_by_hash[commit_hash] = branch_name
+
+    commits: list[dict] = []
+    for entry in entries:
+        branch_name = owner_by_hash.get(entry["hash"])
+        if not branch_name and entry["branch_refs"]:
+            branch_name = (
+                next(
+                    (
+                        ref
+                        for ref in entry["branch_refs"]
+                        if ref in lane_by_branch
+                    ),
+                    None,
+                )
+                or entry["branch_refs"][0]
+            )
+        if not branch_name:
+            branch_name = primary_branch or f"lane-{len(lane_by_branch)}"
+        if branch_name not in lane_by_branch:
+            lane_by_branch[branch_name] = next_lane
+            next_lane += 1
 
         commit = dict(entry)
-        commit["lane"] = lane
-        commit["branch_name"] = branch_name or f"lane-{lane}"
+        commit["branch_name"] = branch_name
+        commit["lane"] = lane_by_branch[branch_name]
         commits.append(commit)
-        max_lane = max(max_lane, lane)
-
-        while active_lanes and active_lanes[-1] is None:
-            active_lanes.pop()
 
     index_by_hash = {
         commit["hash"]: index for index, commit in enumerate(commits)
     }
+    max_lane = max((commit["lane"] for commit in commits), default=0)
     for commit in commits:
         commit["parent_links"] = []
         for parent_hash in commit["parents"]:
@@ -168,9 +203,27 @@ def _build_timeline_layout(entries: list[dict]) -> dict:
             )
             max_lane = max(max_lane, parent_commit["lane"])
 
+    dangling_branches = []
+    for branch_name, meta in branch_metas.items():
+        if branch_name == primary_branch or not meta["dangling"]:
+            continue
+        anchor_hash = meta["anchor_hash"]
+        if anchor_hash not in index_by_hash:
+            continue
+        dangling_branches.append(
+            {
+                "branch_name": branch_name,
+                "anchor_hash": anchor_hash,
+                "lane": lane_by_branch[branch_name],
+                "anchor_lane": commits[index_by_hash[anchor_hash]]["lane"],
+            }
+        )
+        max_lane = max(max_lane, lane_by_branch[branch_name])
+
     return {
         "commits": commits,
         "max_lane": max_lane,
+        "dangling_branches": dangling_branches,
     }
 
 
@@ -211,7 +264,11 @@ def _get_timeline_state(repo_path: str) -> dict:
         return _timeline_cache
 
     entries = git_ops.get_timeline(repo_path, max_count=_GRAPH_MAX_COUNT)
-    _timeline_cache = _build_timeline_layout(entries)
+    branch_lineages = git_ops.get_branch_lineages(
+        repo_path,
+        max_count=_GRAPH_MAX_COUNT,
+    )
+    _timeline_cache = _build_timeline_layout(entries, branch_lineages)
     _timeline_cache_time = now
     _timeline_cache_repo = repo_path
     return _timeline_cache
@@ -648,14 +705,14 @@ def _draw_timeline_overlay() -> None:
         bounds["x"] + 14.0,
         bounds["y"] + bounds["height"] - 28.0,
         "Git Timeline",
-        14,
+        28,
         (1.0, 1.0, 1.0, 1.0),
     )
     _draw_text(
-        bounds["x"] + bounds["width"] - 126.0,
+        bounds["x"] + bounds["width"] - 220.0,
         bounds["y"] + bounds["height"] - 28.0,
         "Bottom-Up" if wm.git_timeline_order == "BOTTOM_UP" else "Top-Down",
-        11,
+        22,
         (0.76, 0.76, 0.76, 1.0),
     )
 
@@ -664,7 +721,7 @@ def _draw_timeline_overlay() -> None:
             bounds["x"] + 14.0,
             bounds["y"] + bounds["height"] - _TIMELINE_HEADER_HEIGHT - 24.0,
             "No commits yet.",
-            12,
+            24,
             (0.85, 0.85, 0.85, 1.0),
         )
         return
@@ -712,6 +769,29 @@ def _draw_timeline_overlay() -> None:
                 _TIMELINE_BRANCH_WIDTH,
             )
 
+    for dangling_branch in graph["dangling_branches"]:
+        anchor_position = node_positions.get(dangling_branch["anchor_hash"])
+        if not anchor_position:
+            continue
+        branch_color = _get_branch_color(context, dangling_branch["branch_name"])
+        start_x = float(anchor_position["x"])
+        start_y = float(anchor_position["y"])
+        end_x = lane_origin_x + (dangling_branch["lane"] * _TIMELINE_LANE_GAP)
+        end_y = start_y + (
+            _TIMELINE_ROW_HEIGHT * (0.65 if wm.git_timeline_order == "TOP_DOWN" else -0.65)
+        )
+        mid_y = start_y + ((end_y - start_y) * 0.5)
+        _draw_polyline(
+            [
+                (start_x, start_y),
+                (start_x, mid_y),
+                (end_x, mid_y),
+                (end_x, end_y),
+            ],
+            _with_alpha(branch_color, 0.92),
+            _TIMELINE_BRANCH_WIDTH,
+        )
+
     mouse_x, mouse_y = _get_mouse_for_area(context)
     hovered_commit = None
 
@@ -733,19 +813,19 @@ def _draw_timeline_overlay() -> None:
             center_y,
             _TIMELINE_BORDER_RADIUS,
             _with_alpha(branch_color, 1.0),
-            4.0,
+            12.0,
         )
 
         label_x = lane_origin_x + ((graph["max_lane"] + 1) * _TIMELINE_LANE_GAP) + 16.0
         label = f"{commit['short_hash']}  {commit['message']}"
-        max_chars = max(20, int((bounds["width"] - (label_x - bounds["x"]) - 12.0) / 7.0))
+        max_chars = max(20, int((bounds["width"] - (label_x - bounds["x"]) - 12.0) / 14.0))
         if len(label) > max_chars:
             label = label[: max_chars - 1].rstrip() + "…"
         _draw_text(
             label_x,
             center_y - 5.0,
             label,
-            11,
+            22,
             (0.9, 0.9, 0.9, 1.0),
         )
 
@@ -759,33 +839,33 @@ def _draw_timeline_overlay() -> None:
         position = node_positions[hovered_commit["hash"]]
         tooltip_x = min(
             float(position["x"]) + 18.0,
-            bounds["x"] + bounds["width"] - 220.0,
+            bounds["x"] + bounds["width"] - 340.0,
         )
         tooltip_y = min(
             float(position["y"]) + 18.0,
-            bounds["y"] + bounds["height"] - 84.0,
+            bounds["y"] + bounds["height"] - 104.0,
         )
-        _draw_rect(tooltip_x, tooltip_y, 210.0, 70.0, (0.04, 0.04, 0.04, 0.97))
+        _draw_rect(tooltip_x, tooltip_y, 320.0, 100.0, (0.04, 0.04, 0.04, 0.97))
         _draw_text(
             tooltip_x + 10.0,
-            tooltip_y + 46.0,
+            tooltip_y + 70.0,
             hovered_commit["message"],
-            12,
+            24,
             (1.0, 1.0, 1.0, 1.0),
         )
         refs_text = ", ".join(hovered_commit["refs"]) if hovered_commit["refs"] else "No refs"
         _draw_text(
             tooltip_x + 10.0,
-            tooltip_y + 28.0,
+            tooltip_y + 42.0,
             f"{hovered_commit['short_hash']}  {refs_text}",
-            10,
+            20,
             (0.78, 0.78, 0.78, 1.0),
         )
         _draw_text(
             tooltip_x + 10.0,
-            tooltip_y + 12.0,
+            tooltip_y + 16.0,
             _format_commit_time(hovered_commit["timestamp"]),
-            10,
+            20,
             (0.66, 0.66, 0.66, 1.0),
         )
 

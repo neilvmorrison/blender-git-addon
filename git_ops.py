@@ -170,6 +170,35 @@ class GitOps:
             )
         self._run_git(["checkout", ref], cwd=repo_path)
 
+    def get_branch_lineages(
+        self,
+        repo_path: str,
+        max_count: int = 150,
+    ) -> dict[str, list[str]]:
+        lineages: dict[str, list[str]] = {}
+        try:
+            branches = self.list_branches(repo_path)
+        except RuntimeError:
+            return lineages
+
+        for branch in branches:
+            name = branch["name"]
+            try:
+                result = self._run_git(
+                    [
+                        "rev-list",
+                        "--first-parent",
+                        name,
+                        f"--max-count={max_count}",
+                    ],
+                    cwd=repo_path,
+                )
+            except RuntimeError:
+                continue
+            hashes = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            lineages[name] = hashes
+        return lineages
+
     def get_timeline(self, repo_path: str, max_count: int = 150) -> list[dict]:
         try:
             result = self._run_git(
