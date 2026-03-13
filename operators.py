@@ -1,4 +1,6 @@
 import os
+import re
+import shutil
 
 import bpy
 
@@ -6,25 +8,132 @@ from .git_ops import git_ops
 from .panels import invalidate_cache, is_repo_cached
 
 
+def _derive_project_name(filepath: str) -> str:
+    """Return a filesystem-safe project name derived from a .blend filepath."""
+    if filepath:
+        name = os.path.splitext(os.path.basename(filepath))[0]
+    else:
+        name = "untitled"
+    name = re.sub(r"[\s\\]+", "-", name.strip())
+    name = re.sub(r"[~^:?*\[\]<>|\"]+", "", name)
+    name = name.strip(".-_")
+    name = re.sub(r"-{2,}", "-", name)
+    return name or "untitled"
+
+
+def _get_projects_dir(context) -> str:
+    """Return the configured projects directory, or empty string if not set."""
+    prefs = context.preferences.addons.get("blender-git")
+    if not prefs:
+        return ""
+    return prefs.preferences.projects_dir or ""
+
+
+class GitOpenPreferences(bpy.types.Operator):
+    bl_idname = "git.open_preferences"
+    bl_label = "Open Addon Preferences"
+    bl_description = "Open addon preferences to set your Projects Directory"
+
+    def execute(self, context):
+        bpy.ops.preferences.addon_show(module="blender-git")
+        return {"FINISHED"}
+
+
 class GitInitRepo(bpy.types.Operator):
     bl_idname = "git.init_repo"
     bl_label = "Initialize Project"
     bl_description = "Set up version control for this Blender project"
 
+    project_name: bpy.props.StringProperty(
+        name="Project Name",
+        description="Name for the project directory",
+        default="",
+    )
+
     @classmethod
     def poll(cls, context):
-        if not bpy.data.filepath:
+        from . import _deps
+        if not _deps.get("git") or not _deps.get("git_lfs"):
             return False
-        return not is_repo_cached(os.path.dirname(bpy.data.filepath))
+        if not _get_projects_dir(context):
+            return False
+        if bpy.data.filepath:
+            return not is_repo_cached(os.path.dirname(bpy.data.filepath))
+        return True
+
+    def invoke(self, context, event):
+        self.project_name = _derive_project_name(bpy.data.filepath)
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "project_name")
 
     def execute(self, context):
+        projects_dir = os.path.normpath(_get_projects_dir(context))
+        name = _derive_project_name(self.project_name) if self.project_name else "untitled"
+
+        filepath = bpy.data.filepath
+        norm_filepath_dir = os.path.normpath(os.path.dirname(filepath)) if filepath else None
+
+        # Check if file is already under projects_dir (init in place)
+        already_under = (
+            norm_filepath_dir is not None
+            and (
+                norm_filepath_dir == projects_dir
+                or norm_filepath_dir.startswith(projects_dir + os.sep)
+            )
+        )
+
+        if already_under:
+            target_dir = norm_filepath_dir
+            new_dir_created = False
+        else:
+            # Compute target_dir, handling collisions
+            target_dir = os.path.join(projects_dir, name)
+            if os.path.exists(target_dir):
+                suffix = 2
+                while os.path.exists(f"{target_dir}-{suffix}"):
+                    suffix += 1
+                target_dir = f"{target_dir}-{suffix}"
+            new_dir_created = True
+
+        file_moved = False
         try:
-            bpy.ops.wm.save_mainfile()
-            repo_path = os.path.dirname(bpy.data.filepath)
-            git_ops.init_repo(repo_path)
-        except RuntimeError as e:
+            if new_dir_created:
+                os.makedirs(target_dir)
+
+            if not filepath:
+                # Case 1: Unsaved file — save into the new project dir
+                blend_path = os.path.join(target_dir, name + ".blend")
+                bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+
+            elif already_under:
+                # Case 2b: Already under projects_dir — init in place
+                bpy.ops.wm.save_mainfile()
+
+            else:
+                # Case 2: Saved file elsewhere — move to new project dir
+                bpy.ops.wm.save_mainfile()
+                dst = os.path.join(target_dir, os.path.basename(filepath))
+                shutil.move(filepath, dst)
+                file_moved = True
+                blend1 = filepath + "1"
+                if os.path.exists(blend1):
+                    shutil.move(blend1, os.path.join(target_dir, os.path.basename(blend1)))
+
+                git_ops.init_repo(target_dir)
+                invalidate_cache()
+                bpy.ops.wm.open_mainfile(filepath=dst)
+                return {"FINISHED"}
+
+            git_ops.init_repo(target_dir)
+
+        except (OSError, RuntimeError) as e:
             self.report({"ERROR"}, str(e))
+            if new_dir_created and not file_moved and os.path.exists(target_dir):
+                shutil.rmtree(target_dir, ignore_errors=True)
             return {"CANCELLED"}
+
         invalidate_cache()
         self.report({"INFO"}, "Project initialized")
         return {"FINISHED"}
@@ -145,6 +254,7 @@ class GitToggleBranchInput(bpy.types.Operator):
 
 
 classes = [
+    GitOpenPreferences,
     GitInitRepo,
     GitCommit,
     GitCreateBranch,

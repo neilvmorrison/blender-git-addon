@@ -92,9 +92,17 @@ class GIT_PT_main(bpy.types.Panel):
             layout.label(text="Then restart Blender.")
             return
 
-        # State 2: No file saved
+        # State 2: No projects directory configured
+        prefs = context.preferences.addons.get("blender-git")
+        projects_dir = prefs.preferences.projects_dir if prefs else ""
+        if not projects_dir:
+            layout.label(text="Set a Projects Directory:", icon="INFO")
+            layout.operator("git.open_preferences", text="Open Preferences", icon="PREFERENCES")
+            return
+
+        # State 3: No file saved — can still initialize (will save into projects_dir)
         if not bpy.data.filepath:
-            layout.label(text="Save your file first.", icon="INFO")
+            layout.operator("git.init_repo", icon="ADD")
             return
 
         repo_path = os.path.dirname(bpy.data.filepath)
@@ -102,12 +110,12 @@ class GIT_PT_main(bpy.types.Panel):
         # Use cached git state to avoid subprocess calls on every redraw
         state = _get_git_state(repo_path)
 
-        # State 3: Not a git repo
+        # State 4: Not a git repo
         if not state["is_repo"]:
             layout.operator("git.init_repo", icon="ADD")
             return
 
-        # State 4: Initialized — full UI
+        # State 5: Initialized — full UI
         layout.label(text=f"Branch: {state['current_branch']}")
 
         # Commit section
